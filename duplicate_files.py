@@ -8,6 +8,7 @@ init(autoreset=True)
 
 OPTION_ERROR = f"{Fore.RED}Wrong option"
 
+
 class File:
 
     def __init__(self, path, size):
@@ -15,7 +16,7 @@ class File:
         self.path = path
         self.hash = None
 
-    def get_hash(self) -> hash:
+    def compute_md5_hash(self) -> hash:
         """returns file's md5-hash value in hex-digit format"""
         with open(self.path, "rb") as file:
             self.hash = md5(file.read()).hexdigest()
@@ -24,89 +25,76 @@ class File:
 class DuplicateFileHandler:
 
     def __init__(self):
-        self.files_list: list = []
-        self.sort_option: bool = True
-        self.result_dict: dict = {}
+        self.files_tuple = None
+        self.sort_option: bool = SORT
+        self.file_extension: str = args.extension
 
-    def get_files_list(self, extension=None):
+    def get_duplicate_files(self):
         """recursively scans directory provided and creates the list of absolute paths filtering by extension"""
-        abs_paths_lst = [
+        # 
+        abs_paths_tuple = tuple(
             join(root, name)
-            for root, dirs, files in os.walk(args.d, topdown=True)
+            for root, dirs, files in os.walk(args.directory, topdown=True)
             for name in files
-            if not extension or name.endswith(extension)
-        ]
+            if not self.file_extension or name.endswith(self.file_extension)
+        )
 
-        self.files_list = [File(size=getsize(path), path=path) for path in abs_paths_lst]
+        file_sizes = tuple(getsize(path) for path in abs_paths_tuple)
+        self.files_tuple = tuple(
+            File(size=getsize(path), path=path) for path in abs_paths_tuple if file_sizes.count(getsize(path)) > 1
+        )
 
-    def check_for_duplicates(self):
-        check = input("\nCheck for duplicates? (Y/N): ").lower()
+        # calculating hashes only for potential duplicates
+        for file in self.files_tuple:
+            file.compute_md5_hash()
 
-        if check == "y":
-            files_size_list = sorted((file.size for file in self.files_list), reverse=self.sort_option)
-            sizes_with_several_files = [file.size for file in self.files_list if files_size_list.count(file.size) > 1]
-            self.files_list = [file for file in self.files_list if file.size in sizes_with_several_files]
-
-            # calculate hashes
-            for file in self.files_list:
-                file.get_hash()
-        elif check == "n":
-            exit(print("OK. Bye!"))
-
-        else:
-            print(OPTION_ERROR)
-            return self.check_for_duplicates()
+        # removing objects with unique hash from the list as those are definitely not a duplicate!
+        file_hashes = tuple(file.hash for file in self.files_tuple)
+        self.files_tuple = tuple(filter(lambda x: file_hashes.count(x.hash) > 1, self.files_tuple))
+        # sort for correct final print 
+        self.files_tuple = tuple(sorted(self.files_tuple, key=lambda f: (f.size, f.hash)))
 
     def print_duplicate_files(self):
         """this function prints the output(result) of the program. if a format key: \n values"""
         del_dict = {}
-        hashes = [file.hash for file in self.files_list]
-        duplicate_hashes = [file.hash for file in self.files_list if hashes.count(file.hash) > 1]
-        self.files_list = filter(lambda x: x.hash in duplicate_hashes, self.files_list)
+        file_size = file_hash = None
+        for i, file in enumerate(self.files_tuple, start=1):
+            # making sure size is printed only once
+            if file_size != file.size:
+                file_size = file.size
+                print(f"\n{file_size:_} bytes\n")
+            if file_hash != file.hash:
+                file_hash = file.hash
+                print("Hash:", file_hash)
 
-        self.result_dict = {}
-        for f in self.files_list:
-            if f.size not in self.result_dict:
-                self.result_dict[f.size] = {f.hash: [f.path]}
-            else:
-                if f.hash not in self.result_dict[f.size]:
-                    self.result_dict[f.size].update({f.hash: [f.path]})
-                else:
-                    if f.path not in self.result_dict[f.size][f.hash]:
-                        self.result_dict[f.size][f.hash].append(f.path)
-
-
-
-        size_hash_dictionary = dict(sorted(self.result_dict.items(), reverse=self.sort_option))
-
-        i = 1
-        for file_size, file_hashes in size_hash_dictionary.items():
-            if file_hashes:
-                print()
-                print(file_size, "bytes\n")
-                for file_hash in file_hashes:
-                    print("Hash:", file_hash)
-                    for file_path in file_hashes[file_hash]:
-                        print(i, file_path)
-                        del_dict[i] = file_path
-                        i += 1
+            print(f"{i}.", file.path)
+            del_dict[i] = file
+            i += 1
         print()
         if del_dict:
-            return self.delete_files(del_dict)
+            return DuplicateFileHandler.delete_files(del_dict)
         else:
-            exit(print(f"{Fore.GREEN}No duplicates found!"))
+            msg = "No duplicates found"
+            exit(
+                print(
+                    f"{Fore.GREEN}{msg}!"
+                    if not self.file_extension
+                    else f"{Fore.GREEN}{msg} with file extension {Fore.RED}{self.file_extension} {Fore.GREEN}!"
+                )
+            )
 
-    def delete_files(self, dl_dict) -> int:
+    @staticmethod
+    def delete_files(dl_dict):
         decision = input("Delete files? (Y/N): ")
-        if decision.lower() not in {"y", "n"}:
+        while decision.lower() not in {"y", "n"}:
             print(OPTION_ERROR)
-            return self.delete_files(dl_dict)
 
         if decision.lower() == "y":
             while True:
                 file_numbers = input("Enter file numbers to delete separated by space:\n").split(" ")
                 try:
                     file_numbers = sorted([int(number) for number in file_numbers], reverse=True)
+                    # checking the biggest index if it exists - all other too!
                     if file_numbers[0] not in dl_dict.keys():
                         raise ValueError
                 except ValueError:
@@ -114,32 +102,35 @@ class DuplicateFileHandler:
                 else:
                     freed_space = 0
                     for number in file_numbers:
-                        freed_space += getsize(dl_dict[number])
-                        os.remove(dl_dict[number])
-                    print(f"{Fore.GREEN}Total freed up space: {freed_space} bytes")
+                        freed_space += dl_dict[number].size
+                        os.remove(dl_dict[number].path)
+                    print(f"{Fore.GREEN}Total freed up space: {freed_space:_} bytes")
                     break
 
     def start(self):
         """this is the main function which calls other functions in a defined order"""
-        self.get_files_list(input("Enter the file format or press 'return' for all: "))
-        self.check_for_duplicates()
+        self.get_duplicate_files()
         self.print_duplicate_files()
 
 
-def fatal_error(msg):
+def _fatal_error(msg):
     exit(print(f"{Fore.RED}{msg}"))
+
 
 if __name__ == "__main__":
     parser = ArgumentParser(description="This program finds duplicate files in a given folder and sub-folders.")
-    parser.add_argument('-d', type=str, default=os.getcwd(), required=False, help='provide directory')
-    parser.add_argument('-s', type=str, default='desc', required=False, help="'asc' or 'desc'")
+    parser.add_argument('-d', '--directory', type=str, default=os.getcwd(), required=False, help='provide directory')
+    parser.add_argument('-e', '--extension', type=str, default=None, required=False, help='provide file extension')
+    parser.add_argument('-s', '--sort', type=str, default='desc', required=False, help="'asc' or 'desc'")
     args = parser.parse_args()
 
-    if not isinstance(args.d, str) or not os.path.exists(args.d):
-        fatal_error('Incorrect path provided.')
+    # validate args
+    if not isinstance(args.directory, str) or not os.path.exists(args.directory):
+        _fatal_error('Incorrect path provided.')
 
-    if not isinstance(args.s, str) or args.s not in ('asc', 'desc'):
-        fatal_error('Incorrect sort option.')
+    if not isinstance(args.sort, str) or args.sort not in ('asc', 'desc'):
+        _fatal_error('Incorrect sort option.')
+    SORT = False if args.sort == 'asc' else True
 
     handler = DuplicateFileHandler()
     handler.start()
