@@ -53,7 +53,7 @@ class DuplicateFileHandler:
         self.files_tuple = tuple(filter(lambda x: file_hashes.count(x.hash) > 1, self.files_tuple))
         # sort for correct final print 
         self.files_tuple = tuple(
-            sorted(self.files_tuple, key=lambda f: (f.size, f.hash), reversed=self.sort_option)
+            sorted(self.files_tuple, key=lambda f: (f.size, f.hash), reverse=self.sort_option)
         )
 
     def print_duplicate_files(self):
