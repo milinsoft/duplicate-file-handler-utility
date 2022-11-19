@@ -30,7 +30,7 @@ class DuplicateFileHandler:
         self.file_extension: str = args.extension
 
     def get_duplicate_files(self):
-        """recursively scans directory provided and creates the list of absolute paths filtering by extension"""
+        """recursively scans directory provided and creates a tuple of absolute paths filtering by extension"""
         # 
         abs_paths_tuple = tuple(
             join(root, name)
@@ -52,7 +52,9 @@ class DuplicateFileHandler:
         file_hashes = tuple(file.hash for file in self.files_tuple)
         self.files_tuple = tuple(filter(lambda x: file_hashes.count(x.hash) > 1, self.files_tuple))
         # sort for correct final print 
-        self.files_tuple = tuple(sorted(self.files_tuple, key=lambda f: (f.size, f.hash)))
+        self.files_tuple = tuple(
+            sorted(self.files_tuple, key=lambda f: (f.size, f.hash), reversed=self.sort_option)
+        )
 
     def print_duplicate_files(self):
         """this function prints the output(result) of the program. if a format key: \n values"""
@@ -88,6 +90,7 @@ class DuplicateFileHandler:
         decision = input("Delete files? (Y/N): ")
         while decision.lower() not in {"y", "n"}:
             print(OPTION_ERROR)
+            return DuplicateFileHandler.delete_files(dl_dict)
 
         if decision.lower() == "y":
             while True:
